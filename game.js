@@ -5,26 +5,36 @@
 // ---------------------------------------------------------------------------
 const CONFIG = {
   saveKey: 'manuscript_save_v1',
-  saveVersion: 3,
+  saveVersion: 5,
   autosaveIntervalMs: 10000,
   tickRate: 10, // simulation ticks per second
   clickPower: 1, // Letters earned per manual click
-  costMultiplier: 7, // each purchase multiplies a tier's cost by this
+  // Each tier has its OWN cost multiplier — steeper for higher tiers, so the
+  // late tiers keep demanding a real climb instead of flattening out once
+  // you can afford them at all (AD-style spike-then-plateau pacing).
   tiers: [
-    { id: 'words', name: 'Words', baseCost: 10 },
-    { id: 'sentences', name: 'Sentences', baseCost: 1e3 },
-    { id: 'paragraphs', name: 'Paragraphs', baseCost: 1e5 },
-    { id: 'pages', name: 'Pages', baseCost: 1e7 },
-    { id: 'chapters', name: 'Chapters', baseCost: 1e9 },
-    { id: 'drafts', name: 'Drafts', baseCost: 1e11 },
+    { id: 'words', name: 'Words', baseCost: 10, costMultiplier: 7 },
+    { id: 'sentences', name: 'Sentences', baseCost: 1e3, costMultiplier: 8 },
+    { id: 'paragraphs', name: 'Paragraphs', baseCost: 1e5, costMultiplier: 9 },
+    { id: 'pages', name: 'Pages', baseCost: 1e7, costMultiplier: 10.5 },
+    { id: 'chapters', name: 'Chapters', baseCost: 1e9, costMultiplier: 12 },
+    { id: 'drafts', name: 'Drafts', baseCost: 1e11, costMultiplier: 14 },
   ],
+  // Antimatter Dimensions-style milestones: every N units PURCHASED (not
+  // owned — see the purchased/owned split below) grants that tier a
+  // permanent multiplier, stacking per milestone crossed. Applies to all 6
+  // tiers uniformly, keeping lower tiers worth buying into the late game.
+  milestones: {
+    purchasedPerMilestone: 10,
+    multiplierPerMilestone: 2,
+  },
   upgrades: [
     { id: 'sturdierKeys', name: 'Sturdier Keys', description: 'Click power ×2 per level.', baseCost: 100, costMultiplier: 10, maxLevel: 10 },
     { id: 'freshRibbon', name: 'Fresh Ribbon', description: 'Words produce ×2 Letters per level.', baseCost: 500, costMultiplier: 12, maxLevel: 8 },
     { id: 'thesaurus', name: 'Thesaurus', description: 'Sentences produce ×2 Words per level.', baseCost: 5e3, costMultiplier: 12, maxLevel: 8 },
     { id: 'coffee', name: 'Coffee', description: 'ALL production ×1.5 per level.', baseCost: 1e5, costMultiplier: 50, maxLevel: 6 },
     { id: 'muse', name: 'Muse', description: 'Clicking also earns 1% of your Letters/sec.', baseCost: 1e6, costMultiplier: 1, maxLevel: 1 },
-    { id: 'editor', name: 'Editor', description: 'Tier costs grow ×6.5 instead of ×7.', baseCost: 1e8, costMultiplier: 1, maxLevel: 1 },
+    { id: 'editor', name: 'Editor', description: 'Every tier’s cost multiplier is 0.5 lower.', baseCost: 1e8, costMultiplier: 1, maxLevel: 1 },
   ],
   upgradeEffects: {
     sturdierKeysMultiplierPerLevel: 2,
@@ -32,12 +42,15 @@ const CONFIG = {
     thesaurusMultiplierPerLevel: 2,
     coffeeMultiplierPerLevel: 1.5,
     museLettersPerSecShare: 0.01,
-    editorCostMultiplier: 6.5,
+    editorCostReduction: 0.5, // subtracted from each tier's own cost multiplier
   },
   prestige: {
     unlockLifetimeLetters: 1e12,
     inspirationDivisor: 1e12,
     inspirationProductionBonus: 0.25, // +25% production per Inspiration, multiplicative
+    newEditionCostFactor: 10, // each Publish multiplies every tier's base cost by this, compounding per edition
+    // (simulated: 1e2 made run 2 a 3-hour wall; 10 gives runs of ~10/~33/~165 min — the AD-style escalating haul)
+    inspirationSoftcap: 10, // gains beyond this per Publish are square-rooted, not linear
   },
   achievementProductionBonus: 0.03, // +3% ALL production per unlocked achievement, multiplicative
   achievementCheckIntervalMs: 1000, // checked at most 1x/sec, never per tick
@@ -108,13 +121,23 @@ const game = {
   playtimeSeconds: 0, // lifetime seconds simulated; never resets
   upgradesEverBought: CONFIG.upgrades.map(() => false), // survives Publish resetting levels to 0
   achievementsUnlocked: CONFIG.achievements.map(() => false), // never re-locks once true
+  lettersThisEdition: 0, // resets on Publish; drives the prestige gate and gain
   lastSaveTime: Date.now(), // wall-clock time of the last save; drives offline progress
+  theme: 'dark', // 'dark' | 'light' — display preference, untouched by Publish/Hard Reset
 };
 
-// Adds Letters earned (not spent) — keeps lifetimeLetters as a true total.
+// Hard numeric ceiling — beyond this, JS doubles approach Infinity and the UI
+// breaks. A proper big-number lib (break_infinity-style) is the v2 fix.
+const NUMBER_CAP = 1e300;
+const clamp = (n) => (n > NUMBER_CAP ? NUMBER_CAP : n);
+
+// Adds Letters earned (not spent). lifetimeLetters is the true total;
+// lettersThisEdition resets on Publish and is what prestige gates/gains use —
+// otherwise one Publish would qualify you forever (free-Inspiration exploit).
 function addLetters(amount) {
-  game.letters += amount;
-  game.lifetimeLetters += amount;
+  game.letters = clamp(game.letters + amount);
+  game.lifetimeLetters = clamp(game.lifetimeLetters + amount);
+  game.lettersThisEdition = clamp(game.lettersThisEdition + amount);
 }
 
 // ---------------------------------------------------------------------------
@@ -137,29 +160,38 @@ function formatNumber(n) {
 // ---------------------------------------------------------------------------
 // Cost math
 // ---------------------------------------------------------------------------
-// Editor upgrade softens tier cost growth from x7 to x6.5, globally.
-function effectiveCostMultiplier() {
+// Each Publish multiplies every tier's base cost by newEditionCostFactor,
+// compounding with editionsPublished — run 2+ climbs against a steeper
+// starting line than run 1, on top of the per-tier multiplier below.
+function effectiveBaseCost(tierIndex) {
+  const base = CONFIG.tiers[tierIndex].baseCost;
+  return base * Math.pow(CONFIG.prestige.newEditionCostFactor, game.editionsPublished);
+}
+
+// Editor upgrade softens a tier's OWN cost multiplier by a flat amount,
+// preserving the relative steepness between tiers rather than flattening
+// them to one shared value.
+function effectiveCostMultiplier(tierIndex) {
   const editor = game.upgrades[UPGRADE_INDEX.editor];
-  return editor.level >= 1 ? CONFIG.upgradeEffects.editorCostMultiplier : CONFIG.costMultiplier;
+  const base = CONFIG.tiers[tierIndex].costMultiplier;
+  return editor.level >= 1 ? base - CONFIG.upgradeEffects.editorCostReduction : base;
 }
 
 function costForOne(tierIndex, purchased) {
-  const t = CONFIG.tiers[tierIndex];
-  return t.baseCost * Math.pow(effectiveCostMultiplier(), purchased);
+  return effectiveBaseCost(tierIndex) * Math.pow(effectiveCostMultiplier(tierIndex), purchased);
 }
 
 // Cost to buy n units starting from `purchased` already bought (geometric sum).
 function costForN(tierIndex, purchased, n) {
-  const t = CONFIG.tiers[tierIndex];
-  const r = effectiveCostMultiplier();
-  return t.baseCost * Math.pow(r, purchased) * (Math.pow(r, n) - 1) / (r - 1);
+  const r = effectiveCostMultiplier(tierIndex);
+  return effectiveBaseCost(tierIndex) * Math.pow(r, purchased) * (Math.pow(r, n) - 1) / (r - 1);
 }
 
 // Largest n affordable with the given amount of letters.
 function maxAffordable(tierIndex, purchased, letters) {
   const firstCost = costForOne(tierIndex, purchased);
   if (letters < firstCost) return 0;
-  const r = effectiveCostMultiplier();
+  const r = effectiveCostMultiplier(tierIndex);
   let n = Math.floor(Math.log((letters * (r - 1)) / firstCost + 1) / Math.log(r));
   if (n < 0) n = 0;
   // Correct for floating-point drift around the boundary.
@@ -181,7 +213,7 @@ function globalProductionMultiplier() {
   const coffeeMult = Math.pow(CONFIG.upgradeEffects.coffeeMultiplierPerLevel, coffeeLevel);
   const inspirationMult = Math.pow(1 + CONFIG.prestige.inspirationProductionBonus, game.inspiration);
   const achievementMult = Math.pow(1 + CONFIG.achievementProductionBonus, unlockedAchievementCount());
-  return coffeeMult * inspirationMult * achievementMult;
+  return clamp(coffeeMult * inspirationMult * achievementMult);
 }
 
 function tierSpecificMultiplier(tierIndex) {
@@ -196,8 +228,19 @@ function tierSpecificMultiplier(tierIndex) {
   return 1;
 }
 
+// Number of 10-purchased milestones crossed for a tier — based on `purchased`
+// (manual buys only), same reasoning as cost: passive cascade production
+// growing `owned` must never inflate this either.
+function tierMilestoneCount(tierIndex) {
+  return Math.floor(game.tiers[tierIndex].purchased / CONFIG.milestones.purchasedPerMilestone);
+}
+
+function tierMilestoneMultiplier(tierIndex) {
+  return Math.pow(CONFIG.milestones.multiplierPerMilestone, tierMilestoneCount(tierIndex));
+}
+
 function tierOutputMultiplier(tierIndex) {
-  return tierSpecificMultiplier(tierIndex) * globalProductionMultiplier();
+  return clamp(tierSpecificMultiplier(tierIndex) * tierMilestoneMultiplier(tierIndex) * globalProductionMultiplier());
 }
 
 function clickPower() {
@@ -248,7 +291,7 @@ function simulateProduction(dt) {
   }
 
   for (let i = 0; i < gains.length; i++) {
-    game.tiers[i].owned += gains[i];
+    game.tiers[i].owned = clamp(game.tiers[i].owned + gains[i]);
   }
   addLetters(letterGain);
 }
@@ -336,10 +379,52 @@ const el = {
   hardResetInput: document.getElementById('hardResetInput'),
   hardResetCancelBtn: document.getElementById('hardResetCancelBtn'),
   hardResetConfirmBtn: document.getElementById('hardResetConfirmBtn'),
+  themeToggle: document.getElementById('themeToggle'),
 };
 
+// ---------------------------------------------------------------------------
+// Theme — dark by default; light mode via data-theme="light" on <html>.
+// Persisted in the save, untouched by Publish/Hard Reset (a display
+// preference, not game progress).
+// ---------------------------------------------------------------------------
+function prefersReducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function applyTheme(theme) {
+  if (theme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+    el.themeToggle.innerHTML = '&#9789;'; // last-quarter moon: switch to dark
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+    el.themeToggle.innerHTML = '&#9728;&#65038;'; // sun (text presentation): switch to light
+  }
+}
+
+function toggleTheme() {
+  game.theme = game.theme === 'light' ? 'dark' : 'light';
+  applyTheme(game.theme);
+  save();
+}
+
+el.themeToggle.addEventListener('click', toggleTheme);
+
+// Displayed Letters count eases toward the real value instead of snapping,
+// each render (10x/sec) — smooth enough without a separate rAF loop. Skipped
+// entirely under prefers-reduced-motion.
+let displayedLetters = 0;
+const LETTERS_COUNT_EASE = 0.3;
+
 function render() {
-  el.lettersCount.textContent = formatNumber(game.letters);
+  if (prefersReducedMotion()) {
+    displayedLetters = game.letters;
+  } else {
+    displayedLetters += (game.letters - displayedLetters) * LETTERS_COUNT_EASE;
+    if (Math.abs(game.letters - displayedLetters) < Math.max(1, game.letters * 1e-6)) {
+      displayedLetters = game.letters;
+    }
+  }
+  el.lettersCount.textContent = formatNumber(displayedLetters);
   el.lettersRate.textContent = `+${formatNumber(lettersPerSecond())}/sec`;
   syncTierStructure();
   updateTierRows();
@@ -432,6 +517,10 @@ function buildTierRow(i) {
   subEl.className = 'tier-sub';
   row.appendChild(subEl);
 
+  const milestoneEl = document.createElement('div');
+  milestoneEl.className = 'tier-milestone';
+  row.appendChild(milestoneEl);
+
   const buttonsWrap = document.createElement('div');
   buttonsWrap.className = 'tier-buttons';
   const b1 = buildBuyButton(i, 1, 'x1');
@@ -442,7 +531,23 @@ function buildTierRow(i) {
   buttonsWrap.appendChild(bMax.btn);
   row.appendChild(buttonsWrap);
 
-  return { row, ownedEl, subEl, buttons: { 1: b1, 10: b10, max: bMax } };
+  // Seeded from the CURRENT milestone count, not 0 — a tier built while
+  // already partway through purchases (fresh unlock mid-game, or a loaded
+  // save) must not glow on its very first render as if it just leveled up.
+  return {
+    row, ownedEl, subEl, milestoneEl,
+    buttons: { 1: b1, 10: b10, max: bMax },
+    lastMilestoneCount: tierMilestoneCount(i),
+  };
+}
+
+// Restarts the CSS glow animation even if it's still mid-flight from a very
+// recent trigger (remove + reflow + re-add, the standard trick for forcing a
+// CSS animation to replay on an already-present class).
+function triggerMilestoneGlow(row) {
+  row.classList.remove('milestone-flash');
+  void row.offsetWidth;
+  row.classList.add('milestone-flash');
 }
 
 // Persistent button: label + optional count (Max only) + cost, as separate
@@ -480,10 +585,21 @@ function updateTierRow(i) {
   const cache = tierRowCache[i];
   const tier = game.tiers[i];
 
-  cache.ownedEl.textContent = `${formatNumber(tier.owned)} owned`;
+  cache.ownedEl.textContent = `${formatNumber(tier.purchased)} bought · ${formatNumber(tier.owned)} owned`;
 
   const producesUnit = i === 0 ? 'Letter' : CONFIG.tiers[i - 1].name.replace(/s$/, '');
   cache.subEl.textContent = `Each produces ${formatNumber(tierOutputMultiplier(i))} ${producesUnit}/sec`;
+
+  const perMilestone = CONFIG.milestones.purchasedPerMilestone;
+  const progress = tier.purchased % perMilestone;
+  cache.milestoneEl.textContent =
+    `Milestone ×${formatNumber(tierMilestoneMultiplier(i))} — ${progress}/${perMilestone} to ×${CONFIG.milestones.multiplierPerMilestone} more`;
+
+  const currentMilestoneCount = tierMilestoneCount(i);
+  if (currentMilestoneCount > cache.lastMilestoneCount) {
+    triggerMilestoneGlow(cache.row);
+  }
+  cache.lastMilestoneCount = currentMilestoneCount;
 
   updateBuyButton(i, 1, cache.buttons[1]);
   updateBuyButton(i, 10, cache.buttons[10]);
@@ -767,12 +883,18 @@ function initDom() {
 // Prestige: Publish
 // ---------------------------------------------------------------------------
 function canPublish() {
-  return game.lifetimeLetters >= CONFIG.prestige.unlockLifetimeLetters;
+  // Gates on THIS edition's letters, not lifetime — lifetime never resets,
+  // so gating on it made every Publish after the first free (exploit).
+  return game.lettersThisEdition >= CONFIG.prestige.unlockLifetimeLetters;
 }
 
+// Linear up to the softcap, then sqrt-scaled beyond it — early Publishes stay
+// generous while very large lettersThisEdition runs don't snowball Inspiration.
 function inspirationGainPreview() {
-  const raw = Math.floor(Math.cbrt(game.lifetimeLetters / CONFIG.prestige.inspirationDivisor));
-  return Math.max(1, raw);
+  const raw = Math.floor(Math.cbrt(game.lettersThisEdition / CONFIG.prestige.inspirationDivisor));
+  const cap = CONFIG.prestige.inspirationSoftcap;
+  const softcapped = raw <= cap ? raw : cap + Math.sqrt(raw - cap);
+  return Math.max(1, Math.floor(softcapped));
 }
 
 function doPublish() {
@@ -781,6 +903,7 @@ function doPublish() {
   game.inspiration += gained;
   game.editionsPublished += 1;
   game.letters = 0;
+  game.lettersThisEdition = 0; // the exploit fix: progress toward next Publish restarts
   game.tiers = newTierState();
   game.upgrades = newUpgradeState();
   save();
@@ -1015,6 +1138,7 @@ function buildSavePayload() {
     version: CONFIG.saveVersion,
     letters: game.letters,
     lifetimeLetters: game.lifetimeLetters,
+    lettersThisEdition: game.lettersThisEdition,
     tiers: game.tiers.map((t) => ({ owned: t.owned, purchased: t.purchased })),
     upgrades: game.upgrades.map((u) => ({ level: u.level })),
     inspiration: game.inspiration,
@@ -1024,6 +1148,7 @@ function buildSavePayload() {
     upgradesEverBought: game.upgradesEverBought.slice(),
     achievementsUnlocked: game.achievementsUnlocked.slice(),
     lastSaveTime: game.lastSaveTime,
+    theme: game.theme,
   };
 }
 
@@ -1099,17 +1224,34 @@ function applySaveData(data) {
     return true;
   }
 
+  if (data.version === 3) {
+    // Pre-lettersThisEdition save (the free-Inspiration exploit era). Seed
+    // this edition's progress from lifetime so an in-flight run isn't robbed
+    // of an earned Publish; the exploit dies because doPublish now resets it.
+    data.lettersThisEdition = typeof data.lifetimeLetters === 'number' ? data.lifetimeLetters : 0;
+    data.version = 4;
+  }
+
+  if (data.version === 4) {
+    // Pre-theme save. Dark is the new default, so a save with no opinion on
+    // theme should land there rather than defaulting to light.
+    data.theme = 'dark';
+    data.version = 5;
+  }
+
   if (data.version !== CONFIG.saveVersion) {
     return false; // unknown/future version — caller leaves state untouched
   }
 
   if (typeof data.letters === 'number') game.letters = data.letters;
   if (typeof data.lifetimeLetters === 'number') game.lifetimeLetters = data.lifetimeLetters;
+  if (typeof data.lettersThisEdition === 'number') game.lettersThisEdition = data.lettersThisEdition;
   if (typeof data.inspiration === 'number') game.inspiration = data.inspiration;
   if (typeof data.editionsPublished === 'number') game.editionsPublished = data.editionsPublished;
   if (typeof data.totalClicks === 'number') game.totalClicks = data.totalClicks;
   if (typeof data.playtimeSeconds === 'number') game.playtimeSeconds = data.playtimeSeconds;
   if (typeof data.lastSaveTime === 'number') game.lastSaveTime = data.lastSaveTime;
+  if (data.theme === 'light' || data.theme === 'dark') game.theme = data.theme;
   loadTiers(data.tiers);
   loadUpgradeLevels(data.upgrades);
   if (Array.isArray(data.upgradesEverBought)) {
@@ -1138,6 +1280,7 @@ function load() {
 // ---------------------------------------------------------------------------
 initDom();
 load();
+applyTheme(game.theme);
 const offlineInfo = applyOfflineProgress();
 render();
 updateAchievementsGrid();

@@ -17,17 +17,41 @@ of writing produce lower tiers automatically (Antimatter Dimensions model).
   T4 **Pages** → produce Paragraphs
   T5 **Chapters** → produce Pages
   T6 **Drafts** → produce Chapters
-- Tier k: base cost = 10^(2k-1) Letters (10, 1e3, 1e5, 1e7, 1e9, 1e11);
-  each purchase multiplies its cost by 7. Production per unit per second:
+- Tier k: base cost = 10^(2k-1) Letters (10, 1e3, 1e5, 1e7, 1e9, 1e11) on a
+  fresh save, multiplied by 10^editionsPublished after every Publish (see
+  Prestige) — each run climbs an order of magnitude steeper than the last.
+  (Simulated: 100x made run 2 a 3-hour wall; 10x yields ~10/~33/~165-minute
+  runs, the intended escalating-haul curve.) Each purchase multiplies a tier's OWN cost
+  multiplier, steeper for higher tiers: Words x7, Sentences x8, Paragraphs
+  x9, Pages x10.5, Chapters x12, Drafts x14. Production per unit per second:
   1 of tier below, times all multipliers.
+- Milestones (Antimatter Dimensions-style): every 10 units PURCHASED of a
+  tier (manual buys only — cascade production growing owned amount doesn't
+  count, same split as cost) grants that tier a permanent x2 production
+  multiplier, stacking per milestone crossed (20 purchased = x4, 30 = x8,
+  ...). Applies uniformly to all 6 tiers and is multiplicative with
+  everything else (Fresh Ribbon/Thesaurus, Coffee, Inspiration,
+  achievements) — keeps lower tiers worth buying into the late game instead
+  of being outpaced once their dedicated upgrade caps out. Each tier row
+  shows purchased vs. owned, progress to the next milestone, and the
+  current milestone multiplier.
 - Buy buttons: x1 / x10 / Max. Tiers unlock when previous tier owned >= 1
   (T1 always visible; show next locked tier as "???" for anticipation).
 
 ## Prestige: Publish
-- Unlocks at 1e12 lifetime Letters ("You have enough for a manuscript...").
-- Publishing resets Letters, tiers, and upgrades; you gain **Inspiration**:
-  floor(cbrt(lifetimeLetters / 1e12)) minimum 1.
+- Unlocks at 1e12 Letters earned THIS EDITION ("You have enough for a
+  manuscript..."). Gates on lettersThisEdition, not lifetime Letters —
+  lifetime never resets, so gating on it would make every Publish after the
+  first free.
+- Publishing resets Letters, tiers, and upgrades (and lettersThisEdition);
+  you gain **Inspiration**: floor(cbrt(lettersThisEdition / 1e12)), minimum
+  1, with a softcap — gains beyond 10 per Publish are square-rooted
+  (10 + sqrt(raw - 10)) rather than linear, so early Publishes stay
+  generous while a single very-long run doesn't snowball Inspiration.
 - Each Inspiration: +25% production (multiplicative with everything).
+- Each Publish multiplies every tier's base cost by 10x, compounding per
+  edition (see Currency & tiers) — the growth spike of a fresh run is
+  followed by an earned plateau, not a repeat of the same climb.
 - Track "Editions published" count; show it like a bibliography.
 
 ## Upgrades (bought with Letters, reset on Publish)
@@ -36,7 +60,7 @@ of writing produce lower tiers automatically (Antimatter Dimensions model).
 3. Thesaurus — T2 production x2 (5e3, x12/level, max 8)
 4. Coffee — ALL production x1.5 (1e5, x50/level, max 6)
 5. Muse — click also earns 1% of Letters/sec (1e6, single)
-6. Editor — tier costs grow x6.5 instead of x7 (1e8, single)
+6. Editor — every tier's own cost multiplier is 0.5 lower (1e8, single)
 
 ## Achievements (each gives +3% ALL production — makes them matter)
 25 achievements in a 5x5 grid, mix of: first Letter typed; 1e3/1e6/1e9/1e12/
@@ -53,15 +77,29 @@ Locked achievements show name only; unlocked show description. Toast on unlock.
   shown in a "While you were away..." modal.
 - Number formatting: plain to 1e6, then scientific (2.34e12). No libraries.
 
-## Design: typewriter terminal
-- Cream paper background (#f4efe4), ink text (#232019), red-ink accent
-  (#a33327) for Publish/prestige elements, faded blue-ink (#3a5a8c) for links.
+## Design: writing by lamplight
+- Dark by default: near-black warm paper (#1a1713), soft cream ink text
+  (#e8ddc7), amber lamp-glow accent (#d9a441) for interactive/highlighted
+  elements (hover states, rates, milestone glow), red-ink (#a33327) kept
+  unchanged for Publish/prestige elements. A light-mode toggle (moon/sun
+  icon, top-right of the header) switches to the original cream-paper
+  typewriter palette (#f4efe4 paper, #232019 ink, #3a5a8c accent); the
+  choice persists in the save.
 - Monospace everything (Courier Prime via Google Fonts, fallback Courier).
-- The clicker is a big round typewriter KEY (letter changes randomly on click).
-- Letters counter ticks like a page count; on click, faint letters "type"
+- The clicker is a big round typewriter KEY (letter changes randomly on
+  click) with a subtle press-depression animation on click.
+- Letters counter ticks like a page count, easing/counting up toward its new
+  value rather than snapping instantly; on click, faint letters "type"
   across the header line (small animation, CSS only).
+- A tier row gets a brief golden glow pulse when one of its milestone
+  multipliers triggers.
+- Achievement toasts slide in like typed index cards (paper-colored card,
+  red-ink tab, a small tilt on entry) rather than a flat notification bar.
 - Ruled-paper horizontal lines as section dividers; achievements grid looks
   like a typesetter's drawer.
+- All motion is CSS-only where practical and respects
+  `prefers-reduced-motion` (animations/transitions collapse to near-instant
+  for users who request it).
 - Responsive: single column on mobile, two columns desktop (tiers left,
   upgrades/achievements right).
 
