@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manuscript</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Courier+Prime&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="terminal">
+
+  <header class="header">
+    <h1 class="title">Manuscript</h1>
+    <p class="subtitle">a blank page, and too much time</p>
+    <div class="type-line" id="typeLine" aria-hidden="true"></div>
+    <div class="bibliography" id="bibliography"></div>
+  </header>
+
+  <hr class="ruled-line">
+
+  <section class="clicker-section">
+    <button id="typewriterKey" class="typewriter-key" aria-label="Type a letter">A</button>
+    <div class="letters-counter">
+      <div class="letters-count" id="lettersCount">0</div>
+      <div class="letters-label">Letters</div>
+      <div class="letters-rate" id="lettersRate">+0/sec</div>
+    </div>
+  </section>
+
+  <section class="publish-section hidden" id="publishSection">
+    <hr class="ruled-line accent">
+    <p class="publish-line">You have enough for a manuscript...</p>
+    <button id="publishBtn" class="publish-btn">Publish</button>
+  </section>
+
+  <hr class="ruled-line">
+
+  <main class="main-grid">
+    <section class="panel tiers-panel">
+      <h2 class="panel-title">Production</h2>
+      <div id="tiersList" class="tiers-list"></div>
+    </section>
+
+    <aside class="panel side-panel">
+      <h2 class="panel-title">Upgrades</h2>
+      <div id="upgradesList" class="upgrades-list"></div>
+
+      <h2 class="panel-title section-title">Achievements</h2>
+      <div id="achievementsGrid" class="achievements-grid"></div>
+
+      <h2 class="panel-title section-title">Ledger</h2>
+      <div id="statsList" class="stats-list"></div>
+
+      <h2 class="panel-title section-title">Save</h2>
+      <div class="save-controls">
+        <button id="exportBtn" class="save-btn">Export</button>
+        <button id="importBtn" class="save-btn">Import</button>
+        <button id="hardResetBtn" class="save-btn danger">Hard Reset</button>
+      </div>
+    </aside>
+  </main>
+
+</div>
+
+<div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+<div class="modal-overlay hidden" id="publishModal">
+  <div class="modal">
+    <h3 class="modal-title">Publish this manuscript?</h3>
+    <p class="modal-body" id="publishModalBody"></p>
+    <div class="modal-buttons">
+      <button id="publishCancelBtn" class="modal-btn">Cancel</button>
+      <button id="publishConfirmBtn" class="modal-btn accent">Publish</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="offlineModal">
+  <div class="modal">
+    <h3 class="modal-title">While you were away...</h3>
+    <p class="modal-body" id="offlineModalBody"></p>
+    <div class="modal-buttons">
+      <button id="offlineOkBtn" class="modal-btn accent">Back to writing</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="exportModal">
+  <div class="modal">
+    <h3 class="modal-title">Export save</h3>
+    <p class="modal-body">Copy this text somewhere safe. You can paste it back in via Import.</p>
+    <textarea id="exportText" class="save-textarea" readonly></textarea>
+    <div class="modal-buttons">
+      <button id="exportCloseBtn" class="modal-btn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="importModal">
+  <div class="modal">
+    <h3 class="modal-title">Import save</h3>
+    <p class="modal-body">Paste a previously exported save below. This replaces your current progress.</p>
+    <textarea id="importText" class="save-textarea" placeholder="Paste base64 save data here..."></textarea>
+    <p class="modal-error hidden" id="importError">That doesn't look like a valid save.</p>
+    <div class="modal-buttons">
+      <button id="importCancelBtn" class="modal-btn">Cancel</button>
+      <button id="importConfirmBtn" class="modal-btn accent">Import</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="hardResetModal">
+  <div class="modal">
+    <h3 class="modal-title">Hard Reset</h3>
+    <p class="modal-body">This permanently erases everything — Letters, tiers, upgrades, Inspiration, editions, and achievements. There is no undo. Type <strong>RESET</strong> below to confirm.</p>
+    <input type="text" id="hardResetInput" class="save-textinput" autocomplete="off" spellcheck="false">
+    <div class="modal-buttons">
+      <button id="hardResetCancelBtn" class="modal-btn">Cancel</button>
+      <button id="hardResetConfirmBtn" class="modal-btn accent" disabled>Erase Everything</button>
+    </div>
+  </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
