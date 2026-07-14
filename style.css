@@ -675,6 +675,27 @@ html, body {
   }
 }
 
+/* Floating "+N" click feedback — spawned at the cursor, drifts up and fades.
+   position:fixed (uses clientX/Y), pointer-events:none so it never eats the
+   next click, and animation-fill-mode keeps it invisible after it ends. */
+.click-gain {
+  position: fixed;
+  transform: translateX(-50%);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--accent);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  user-select: none;
+  z-index: 999;
+  animation: click-gain-rise 0.9s ease-out forwards;
+}
+@keyframes click-gain-rise {
+  0%   { opacity: 0; transform: translate(-50%, 4px) scale(0.8); }
+  15%  { opacity: 1; transform: translate(-50%, -4px) scale(1.05); }
+  100% { opacity: 0; transform: translate(-50%, -44px) scale(1); }
+}
+
 /* Motion: collapse every animation/transition to near-instant for users who
    request reduced motion, instead of maintaining a parallel no-motion path
    per rule. */

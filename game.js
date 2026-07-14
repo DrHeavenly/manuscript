@@ -1100,18 +1100,34 @@ function randomLetter() {
   return RANDOM_LETTERS[Math.floor(Math.random() * RANDOM_LETTERS.length)];
 }
 
-function onKeyClick() {
+function onKeyClick(event) {
   let gain = clickPower();
   if (game.upgrades[UPGRADE_INDEX.muse].level >= 1) {
     gain += CONFIG.upgradeEffects.museLettersPerSecShare * lettersPerSecond();
   }
   addLetters(gain);
+  spawnClickGain(gain, event);
   game.totalClicks += 1;
   el.typewriterKey.textContent = randomLetter();
   spawnTypeFlit();
   el.lettersCount.classList.add('pulse');
   setTimeout(() => el.lettersCount.classList.remove('pulse'), 150);
   render();
+}
+
+// Floating "+N" at the cursor position on each click. Fixed positioning from
+// clientX/Y so it works regardless of scroll or layout; small random x-drift
+// stops rapid clicks from stacking into one unreadable blob.
+function spawnClickGain(gain, event) {
+  const tag = document.createElement('span');
+  tag.className = 'click-gain';
+  tag.textContent = `+${formatNumber(gain)}`;
+  const x = event && typeof event.clientX === 'number' ? event.clientX : el.typewriterKey.getBoundingClientRect().left;
+  const y = event && typeof event.clientY === 'number' ? event.clientY : el.typewriterKey.getBoundingClientRect().top;
+  tag.style.left = `${x + (Math.random() * 24 - 12)}px`;
+  tag.style.top = `${y - 14}px`;
+  document.body.appendChild(tag);
+  tag.addEventListener('animationend', () => tag.remove());
 }
 
 function spawnTypeFlit() {
